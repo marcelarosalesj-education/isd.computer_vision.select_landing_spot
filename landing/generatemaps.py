@@ -12,6 +12,7 @@ def generateSin():
 	Z = abs(np.sin(R))
 	np.savetxt("./maps/sin.txt", Z, fmt="%.4f", delimiter="\t", newline="\n")
 	
+	
 
 
 generateSin()
