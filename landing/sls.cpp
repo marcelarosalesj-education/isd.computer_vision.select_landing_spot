@@ -14,6 +14,8 @@
 #include <time.h>
 #include <math.h>
 #include <vector>
+#include "pthread.h"
+
 //#include <opencv2/viz.hpp>
 
 // PCL
@@ -24,22 +26,19 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/console/parse.h>*/
 
-
+#define THREAD_COUNT 4
 #define RESOLUTION 0.1
 #define LIMITS 20.0
 #define THRESHOLD 0.075
 #define PERCENTAGE 0.7
-
-// size of the original matrix / elevation map
-#define TAM 200
+#define TAM 200 // size of the original matrix / elevation map
 
 using namespace cv;
 using namespace std;
 Mat mapcv;
 string filename;
-
-void CallBackFunc(int event, int x, int y, int flags, void* userdata)
-{
+long rowsPerThread;
+void CallBackFunc(int event, int x, int y, int flags, void* userdata) {
      uchar* destination;
      if  ( event == EVENT_LBUTTONDOWN )
      {
@@ -57,7 +56,7 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 }
 
 
-Mat tab_to_mat(){
+Mat tab_to_mat() {
 	Mat mapcv(TAM, TAM, CV_32F, Scalar(255,255,255));
     std::ifstream file("./maps/"+filename+".txt");
     std::string str;
@@ -82,6 +81,25 @@ struct Spot {
 	Point coordinate;
 	int stability;
 };
+
+
+struct param{
+	Mat map;
+	int radius;
+	float slope;
+	int thNum;
+};
+
+void *threadRoutine(void *p){
+	struct param *data = (struct param*)p;
+	cout << "THROUTINE"<<endl;
+
+	//cout << data->map<<endl;
+	cout << data->radius<<endl;
+	cout << data->slope<<endl;
+	cout << data->thNum<<endl;
+
+}
 
 Point select_landing_spot(Mat map, int radius, float slope){
 	Mat result(map.rows, map.cols, CV_8UC3, Scalar(255,255,255));
@@ -192,7 +210,6 @@ int main(int argc, char* argv[])
 
 
 	mapcv = tab_to_mat();
-	//saveMatrix(mapcv, "mapcv.txt");
 	imshow("original", mapcv);
 	setMouseCallback("original", CallBackFunc, NULL);
 
@@ -207,6 +224,27 @@ int main(int argc, char* argv[])
 	end = clock();
 	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
 	cout<<"SLS: Finding spot time = "<<ttime<<endl<<endl;
+
+	cout << "NOW MULTITHREADED:"<<endl;
+	pthread_t threadHandle[THREAD_COUNT];
+	struct param threadParameters[THREAD_COUNT];
+	
+	begin=clock();
+	rowsPerThread = TAM/THREAD_COUNT;
+	for(int i=0; i<THREAD_COUNT;i++){
+		threadParameters[i].map = mapcv;
+		threadParameters[i].radius = rad;
+		threadParameters[i].slope = slope; 
+		threadParameters[i].thNum=i;
+		pthread_create( &threadHandle[i], NULL, &threadRoutine, &threadParameters[i]);
+	}
+	for(int i=0; i<THREAD_COUNT;i++){
+		pthread_join( threadHandle[i], NULL);
+	}
+	end=clock();
+	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
+	cout<<"MULTI SLS: Finding spot time = "<<ttime<<endl<<endl;	
+
 
 	cout<<endl<<"Press 'q' to close each windows ... "<<endl;
 	while(key != 27) {

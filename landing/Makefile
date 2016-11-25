@@ -6,7 +6,7 @@ LFLAGS = -Wall $(DEBUG)
 all:sls
 
 sls:sls.cpp
-	g++ -std=c++11 -o sls sls.cpp `pkg-config opencv --cflags --libs`
+	g++ -o sls sls.cpp `pkg-config opencv --cflags --libs` -lpthread -std=c++11
 
 clean:
 	\rm sls
