@@ -16,54 +16,39 @@
 #include <vector>
 #include "pthread.h"
 
-//#include <opencv2/viz.hpp>
-
-// PCL
-/*#include <boost/thread/thread.hpp>
-#include <pcl/common/common_headers.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/console/parse.h>*/
-
 #define THREAD_COUNT 4
 #define RESOLUTION 0.1
 #define LIMITS 20.0
 #define THRESHOLD 0.075
 #define PERCENTAGE 0.7
-#define TAM 200 // size of the original matrix / elevation map
+#define TAM 200
 
 using namespace cv;
 using namespace std;
-Mat mapcv;
+Mat mapcv, thResult;
 string filename;
 long rowsPerThread;
+
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
+
 void CallBackFunc(int event, int x, int y, int flags, void* userdata) {
      uchar* destination;
-     if  ( event == EVENT_LBUTTONDOWN )
-     {
+     if  ( event == EVENT_LBUTTONDOWN ) {
           cout << "Left button (" << y << ", " << x << ")" << endl;
           cout << "val:"<< mapcv.at<float>(y,x) <<endl;
      }
-     else if  ( event == EVENT_RBUTTONDOWN )
-     {
+     else if  ( event == EVENT_RBUTTONDOWN ) {
           cout << "Right button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
      }
-     else if  ( event == EVENT_MBUTTONDOWN )
-     {
+     else if  ( event == EVENT_MBUTTONDOWN ) {
           cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
      }
 }
 
-
 Mat tab_to_mat() {
-	Mat mapcv(TAM, TAM, CV_32F, Scalar(255,255,255));
+	Mat mapcv(TAM, TAM, CV_32F, Scalar(0.0));
     std::ifstream file("./maps/"+filename+".txt");
     std::string str;
-    int row, col;
-    row = 0;
-    bool flag = true;
-    string num;
 
     for(int i=0; i<TAM; i++){
     	for(int j=0; j<TAM; j++){
@@ -82,9 +67,9 @@ struct Spot {
 	int stability;
 };
 
-
 struct param{
 	Mat map;
+	Mat res;
 	int radius;
 	float slope;
 	int thNum;
@@ -92,12 +77,47 @@ struct param{
 
 void *threadRoutine(void *p){
 	struct param *data = (struct param*)p;
-	cout << "THROUTINE"<<endl;
+	int radius = data->radius;
+	float slope = data->slope;
+	int thNum = data->thNum;
+	int cindex=0;
 
-	//cout << data->map<<endl;
-	cout << data->radius<<endl;
-	cout << data->slope<<endl;
-	cout << data->thNum<<endl;
+	int firstRow = rowsPerThread * data->thNum;
+
+	Mat localMap(rowsPerThread, TAM, CV_8UC3, Scalar(255,255,255) );
+
+
+	for(int row = firstRow+radius, lr = radius; row < (firstRow+rowsPerThread) ; row+= radius, lr+= radius){
+		for(int col = radius; col < mapcv.cols; col+= radius){
+			
+
+			if( mapcv.at<float>(row,col) != 0 && 
+				abs(mapcv.at<float>(row,col-radius) - mapcv.at<float>(row,col+radius)) < slope &&
+				abs(mapcv.at<float>(row-radius,col) - mapcv.at<float>(row+radius,col)) < slope &&
+				abs(mapcv.at<float>(row-radius,col-radius) - mapcv.at<float>(row+radius,col+radius)) < slope &&
+				abs(mapcv.at<float>(row-radius,col+radius) - mapcv.at<float>(row+radius,col-radius)) < slope) {
+					//pthread_mutex_lock( &mutex1 );
+					//cout << "("<<col<<","<<row<<")"<<endl; // (x,y)
+					//pthread_mutex_unlock( &mutex1 );
+					
+					for(int pi=lr-radius+1; pi<lr+radius-1; pi++){
+						for(int pj=col-radius+1; pj<col+radius-1; pj++){
+							localMap.at<Vec3b>(pi,pj)[0] = 0; 	// B
+							localMap.at<Vec3b>(pi,pj)[1] = 0; 	// G
+							localMap.at<Vec3b>(pi,pj)[2] = 255; // R
+
+
+						} // For col
+					} // For rows
+
+			}
+
+		}
+
+	}
+	pthread_mutex_lock( &mutex1 );
+	localMap.copyTo( data->res( Rect(0, firstRow, localMap.cols, localMap.rows) ) );
+	pthread_mutex_unlock( &mutex1 );
 
 }
 
@@ -135,7 +155,7 @@ Point select_landing_spot(Mat map, int radius, float slope){
 					abs(map.at<float>(row-radius,col-radius) - map.at<float>(row+radius,col+radius)) < slope &&
 					abs(map.at<float>(row-radius,col+radius) - map.at<float>(row+radius,col-radius)) < slope) {
 
-					pts[cindex].coordinate = Point(col, row); // (col, row)
+					pts[cindex].coordinate = Point(col, row); // (col, row) (x,y)
 					pts[cindex].stability = 0;
 					for(int pi=row-radius+1; pi<row+radius-1; pi++){
 						for(int pj=col-radius+1; pj<col+radius-1; pj++){
@@ -197,11 +217,11 @@ Point select_landing_spot(Mat map, int radius, float slope){
 int main(int argc, char* argv[])
 {
 
-	if(argc != 2){
-		cout << "USAGE: "<< argv[0] << " filename"<<endl;
+	if(argc != 4){
+		cout << "USAGE: "<< argv[0] << " <filename> <radius> <slope>"<<endl;
 		return -1;
 	}
-	filename=argv[1];
+	filename = argv[1];
 
 	// Read input parameters
 	clock_t begin, end;
@@ -210,29 +230,31 @@ int main(int argc, char* argv[])
 
 
 	mapcv = tab_to_mat();
-	imshow("original", mapcv);
-	setMouseCallback("original", CallBackFunc, NULL);
 
-	int rad;
-	float slope;
+	int rad = atoi(argv[2]);
+	float slope = atof(argv[3]);
 	Point target;
-	rad = 8;
-	slope = 0.1;
 
 	begin = clock();
 	target = select_landing_spot(mapcv, rad, slope);
 	end = clock();
+	
 	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
-	cout<<"SLS: Finding spot time = "<<ttime<<endl<<endl;
+	cout << "SLS: Finding spot time = " << ttime << endl << endl;
 
-	cout << "NOW MULTITHREADED:"<<endl;
+
+	//----------------------------------
+	
 	pthread_t threadHandle[THREAD_COUNT];
 	struct param threadParameters[THREAD_COUNT];
-	
+	Mat thResult(TAM, TAM, CV_8UC3, Scalar(255,255,255)  );
+
 	begin=clock();
 	rowsPerThread = TAM/THREAD_COUNT;
+
 	for(int i=0; i<THREAD_COUNT;i++){
 		threadParameters[i].map = mapcv;
+		threadParameters[i].res = thResult;
 		threadParameters[i].radius = rad;
 		threadParameters[i].slope = slope; 
 		threadParameters[i].thNum=i;
@@ -245,10 +267,13 @@ int main(int argc, char* argv[])
 	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
 	cout<<"MULTI SLS: Finding spot time = "<<ttime<<endl<<endl;	
 
+	imshow("TH RESULT", thResult);
+	setMouseCallback("TH RESULT", CallBackFunc, NULL);
 
 	cout<<endl<<"Press 'q' to close each windows ... "<<endl;
 	while(key != 27) {
 		imshow("Opencv Map", mapcv);
+		setMouseCallback("Opencv Map", CallBackFunc, NULL);
 		key = waitKey(1);
 	}
 
