@@ -16,7 +16,7 @@
 #include <vector>
 #include "pthread.h"
 
-#define THREAD_COUNT 4
+#define THREAD_COUNT 8
 #define RESOLUTION 0.1
 #define LIMITS 20.0
 #define THRESHOLD 0.075
@@ -56,8 +56,6 @@ Mat tab_to_mat() {
     		mapcv.at<float>(i,j) = std::stof(str);
     	}
     }
-
-    cout <<"end tab to mat" << endl;
     file.close();
 	return mapcv;
 }
@@ -75,47 +73,92 @@ struct param{
 	int thNum;
 };
 
+
+Spot CandidatosThreads[THREAD_COUNT];
+int globalindex=0;
 void *threadRoutine(void *p){
 	struct param *data = (struct param*)p;
 	int radius = data->radius;
 	float slope = data->slope;
 	int thNum = data->thNum;
 	int cindex=0;
+	Spot thPts[100];
 
 	int firstRow = rowsPerThread * data->thNum;
 
 	Mat localMap(rowsPerThread, TAM, CV_8UC3, Scalar(255,255,255) );
 
-
 	for(int row = firstRow+radius, lr = radius; row < (firstRow+rowsPerThread) ; row+= radius, lr+= radius){
 		for(int col = radius; col < mapcv.cols; col+= radius){
 			
 
-			if( mapcv.at<float>(row,col) != 0 && 
+			if( mapcv.at<float>(row,col) > 0 && 
 				abs(mapcv.at<float>(row,col-radius) - mapcv.at<float>(row,col+radius)) < slope &&
 				abs(mapcv.at<float>(row-radius,col) - mapcv.at<float>(row+radius,col)) < slope &&
 				abs(mapcv.at<float>(row-radius,col-radius) - mapcv.at<float>(row+radius,col+radius)) < slope &&
 				abs(mapcv.at<float>(row-radius,col+radius) - mapcv.at<float>(row+radius,col-radius)) < slope) {
-					//pthread_mutex_lock( &mutex1 );
-					//cout << "("<<col<<","<<row<<")"<<endl; // (x,y)
-					//pthread_mutex_unlock( &mutex1 );
 					
+					thPts[cindex].coordinate = Point(col, row); // (col, row)
+					thPts[cindex].stability = 0;
+					
+					pthread_mutex_lock( &mutex1 );
+					//cout << "("<<col<<","<<row<<")"<<endl; // (x,y)					
+					pthread_mutex_unlock( &mutex1 );
 					for(int pi=lr-radius+1; pi<lr+radius-1; pi++){
 						for(int pj=col-radius+1; pj<col+radius-1; pj++){
+							
 							localMap.at<Vec3b>(pi,pj)[0] = 0; 	// B
 							localMap.at<Vec3b>(pi,pj)[1] = 0; 	// G
 							localMap.at<Vec3b>(pi,pj)[2] = 255; // R
 
 
+							int p1 = mapcv.at<float>(pi-1,pj);
+							int p2 = mapcv.at<float>(pi+1,pj);
+							int p3 = mapcv.at<float>(pi,pj-1);
+							int p4 = mapcv.at<float>(pi,pj+1);
+							int p5 = mapcv.at<float>(pi-1,pj-1);
+							int p6 = mapcv.at<float>(pi+1,pj+1);
+							int p7 = mapcv.at<float>(pi+1,pj-1);
+							int p8 = mapcv.at<float>(pi-1,pj+1);
+							if( p1 != 0 && p2 != 0 && p3 != 0 && p4 != 0 &&
+								p5 != 0 && p6 != 0 && p7 != 0 && p8 != 0 ){
+								if( abs( p1 - p2 ) < slope && abs( p3 - p4 ) < slope &&
+									abs( p5 - p6 ) < slope && abs( p7 - p8 ) < slope ){
+
+									thPts[cindex].stability += 1;
+									
+								}
+							}
+
 						} // For col
 					} // For rows
 
+					cout << thPts[cindex].coordinate << " " << thPts[cindex].stability <<endl;
+
+					cindex++;
+					if(cindex == 100){
+						row=mapcv.rows-radius;
+						col=mapcv.cols-radius;
+					}
 			}
 
 		}
 
 	}
+
+	Spot bestplacetoland;
+	bestplacetoland.stability=-1;
+	bestplacetoland.coordinate=Point(-1,-1);
+	for(int k = 0; k < cindex; k++){
+		//cout << ">" << thPts[k].coordinate << "  S:" << thPts[k].stability <<endl;
+		if(thPts[k].stability > bestplacetoland.stability){
+			bestplacetoland = thPts[k];
+		}
+	}
+
 	pthread_mutex_lock( &mutex1 );
+	CandidatosThreads[globalindex]=bestplacetoland;
+	globalindex++;
 	localMap.copyTo( data->res( Rect(0, firstRow, localMap.cols, localMap.rows) ) );
 	pthread_mutex_unlock( &mutex1 );
 
@@ -195,14 +238,14 @@ Point select_landing_spot(Mat map, int radius, float slope){
 
 		} // for col
 	} // for row
-	cout << "RESULTS:"<<endl;
+	//cout << "RESULTS:"<<endl;
 	Spot bestplacetoland;
 	bestplacetoland.stability=-1;
 	bestplacetoland.coordinate=Point(0,0);
 	for(int k = 0; k < cindex; k++){
-		cout << ">" << pts[k].coordinate << "  S:" << pts[k].stability <<endl;
+		//cout << ">" << pts[k].coordinate << "  S:" << pts[k].stability <<endl;
 		if(pts[k].stability > bestplacetoland.stability){
-			bestplacetoland.coordinate = pts[k].coordinate;
+			bestplacetoland = pts[k];
 		}
 	}
 	cout << "Landing spot : "<< bestplacetoland.coordinate<<endl;
@@ -267,8 +310,28 @@ int main(int argc, char* argv[])
 	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
 	cout<<"MULTI SLS: Finding spot time = "<<ttime<<endl<<endl;	
 
+	for(int idx=0; idx < THREAD_COUNT; idx++){
+		cout << CandidatosThreads[idx].coordinate<<endl;
+	}
+
 	imshow("TH RESULT", thResult);
 	setMouseCallback("TH RESULT", CallBackFunc, NULL);
+
+	Spot landResult;
+	landResult.stability=-1;
+	landResult.coordinate=Point(0,0);
+	for(int k = 0; k < THREAD_COUNT; k++){
+		//cout << ">" << CandidatosThreads[k].coordinate << "  S:" << CandidatosThreads[k].stability <<endl;
+		if(CandidatosThreads[k].coordinate.x == -1 && CandidatosThreads[k].coordinate.y == -1){
+			// DO NOTHING
+		} else if(CandidatosThreads[k].stability > landResult.stability){
+			landResult.coordinate = CandidatosThreads[k].coordinate;
+		}
+	}
+
+	cout << "EL RESULTADO ES: "<< landResult.coordinate<<endl;
+
+
 
 	cout<<endl<<"Press 'q' to close each windows ... "<<endl;
 	while(key != 27) {
