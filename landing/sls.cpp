@@ -15,7 +15,6 @@
 #include <math.h>
 #include <vector>
 #include "pthread.h"
-#include <GL/glut.h>
 
 #define THREAD_COUNT 8
 #define RESOLUTION 0.1
@@ -31,6 +30,8 @@ string filename;
 long rowsPerThread;
 
 pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
+
+
 
 void CallBackFunc(int event, int x, int y, int flags, void* userdata) {
      uchar* destination;
@@ -256,8 +257,7 @@ Point select_landing_spot(Mat map, int radius, float slope){
 	return bestplacetoland.coordinate;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
 
 	if(argc != 4){
 		cout << "USAGE: "<< argv[0] << " <filename> <radius> <slope>"<<endl;
