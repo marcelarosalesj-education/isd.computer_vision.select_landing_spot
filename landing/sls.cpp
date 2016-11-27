@@ -15,6 +15,7 @@
 #include <math.h>
 #include <vector>
 #include "pthread.h"
+#include <GL/glut.h>
 
 #define THREAD_COUNT 8
 #define RESOLUTION 0.1
@@ -34,7 +35,7 @@ pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
 void CallBackFunc(int event, int x, int y, int flags, void* userdata) {
      uchar* destination;
      if  ( event == EVENT_LBUTTONDOWN ) {
-          cout << "Left button (" << y << ", " << x << ")" << endl;
+          cout << "Left button (" << x << ", " << y << ")" << endl;
           cout << "val:"<< mapcv.at<float>(y,x) <<endl;
      }
      else if  ( event == EVENT_RBUTTONDOWN ) {
@@ -73,7 +74,7 @@ struct param{
 	int thNum;
 };
 
-
+int aux=0;
 Spot CandidatosThreads[THREAD_COUNT];
 int globalindex=0;
 void *threadRoutine(void *p){
@@ -111,7 +112,7 @@ void *threadRoutine(void *p){
 							localMap.at<Vec3b>(pi,pj)[1] = 0; 	// G
 							localMap.at<Vec3b>(pi,pj)[2] = 255; // R
 
-
+							//cout << data->thNum<<"["<<pj<<","<<pi<<"] "<<endl;
 							int p1 = mapcv.at<float>(pi-1,pj);
 							int p2 = mapcv.at<float>(pi+1,pj);
 							int p3 = mapcv.at<float>(pi,pj-1);
@@ -124,17 +125,12 @@ void *threadRoutine(void *p){
 								p5 != 0 && p6 != 0 && p7 != 0 && p8 != 0 ){
 								if( abs( p1 - p2 ) < slope && abs( p3 - p4 ) < slope &&
 									abs( p5 - p6 ) < slope && abs( p7 - p8 ) < slope ){
-
-									thPts[cindex].stability += 1;
-									
+									thPts[cindex].stability += 1;								
 								}
 							}
-
 						} // For col
 					} // For rows
-
-					cout << thPts[cindex].coordinate << " " << thPts[cindex].stability <<endl;
-
+					//cout <<endl;
 					cindex++;
 					if(cindex == 100){
 						row=mapcv.rows-radius;
@@ -159,6 +155,11 @@ void *threadRoutine(void *p){
 	pthread_mutex_lock( &mutex1 );
 	CandidatosThreads[globalindex]=bestplacetoland;
 	globalindex++;
+	
+	ostringstream conv;
+	conv << aux;
+	//imshow("TH"+conv.str(), localMap);
+	aux++;
 	localMap.copyTo( data->res( Rect(0, firstRow, localMap.cols, localMap.rows) ) );
 	pthread_mutex_unlock( &mutex1 );
 
@@ -248,8 +249,6 @@ Point select_landing_spot(Mat map, int radius, float slope){
 			bestplacetoland = pts[k];
 		}
 	}
-	cout << "Landing spot : "<< bestplacetoland.coordinate<<endl;
-
 
 	imshow("SLS: Options", result);
 	setMouseCallback("SLS: Options", CallBackFunc, NULL);
@@ -283,8 +282,8 @@ int main(int argc, char* argv[])
 	end = clock();
 	
 	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
-	cout << "SLS: Finding spot time = " << ttime << endl << endl;
-
+	cout << "SLS: Finding spot time = " << ttime << endl;
+	cout << "SLS: target =" << target << endl << endl;
 
 	//----------------------------------
 	
@@ -303,19 +302,12 @@ int main(int argc, char* argv[])
 		threadParameters[i].thNum=i;
 		pthread_create( &threadHandle[i], NULL, &threadRoutine, &threadParameters[i]);
 	}
+	// Collect Threads
 	for(int i=0; i<THREAD_COUNT;i++){
 		pthread_join( threadHandle[i], NULL);
 	}
-	end=clock();
-	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
-	cout<<"MULTI SLS: Finding spot time = "<<ttime<<endl<<endl;	
 
-	for(int idx=0; idx < THREAD_COUNT; idx++){
-		cout << CandidatosThreads[idx].coordinate<<endl;
-	}
 
-	imshow("TH RESULT", thResult);
-	setMouseCallback("TH RESULT", CallBackFunc, NULL);
 
 	Spot landResult;
 	landResult.stability=-1;
@@ -329,9 +321,14 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	cout << "EL RESULTADO ES: "<< landResult.coordinate<<endl;
+	end=clock();
+	ttime = (double) (end - begin)/CLOCKS_PER_SEC;
 
+	cout << "SLSm: Finding spot time = " << ttime << endl;
+	cout << "SLSm: target =" << landResult.coordinate << endl;
 
+	imshow("SLSm", thResult);
+	setMouseCallback("SLSm", CallBackFunc, NULL);
 
 	cout<<endl<<"Press 'q' to close each windows ... "<<endl;
 	while(key != 27) {
